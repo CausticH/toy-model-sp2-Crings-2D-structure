@@ -102,10 +102,6 @@ def get_symmetric_equivalents(pos, symmetry):
         return list(equivalents)
     elif symmetry == 'C2':
         return [(q, r), (-q, -r)]
-    elif symmetry == 'mirror':
-        return [(q, r), (-r, -q)]
-    else:  # C1 (asymmetric)
-        return [(q, r)]
 
 
 def detect_highest_symmetry(centers):
@@ -119,9 +115,6 @@ def detect_highest_symmetry(centers):
         return 'C3'
     if all((-q, -r) in center_set for q, r in center_set):
         return 'C2'
-    if all((-r, -q) in center_set for q, r in center_set):
-        return 'mirror'
-    return 'asymmetric'
 
 
 def _map_real_to_perfect(mol, perfect_keys, coord_decimals=6):
@@ -389,7 +382,7 @@ def worker_generate_once(args):
     min_rings, max_rings = args
     try:
         rng = random.Random()
-        target_symmetry = rng.choice(['C2', 'C3', 'C6', 'mirror', 'asymmetric'])
+        target_symmetry = rng.choice(['C2', 'C3', 'C6'])
         target_n = rng.randint(min_rings, max_rings)
         centers = grow_random_symmetric(steps=target_n - 1, symmetry=target_symmetry, rng=rng)
         if not (min_rings <= len(centers) <= max_rings):
@@ -415,11 +408,11 @@ def _wait_for_ready(async_list, timeout):
         time.sleep(0.001)
 
 
-def demo_with_export_range(n_molecules=10, outdir="output", min_rings=6, max_rings=100, n_procs=None,
+def demo_with_export_range(n_molecules=10, outdir="output", min_rings=20, max_rings=100, n_procs=None,
                            poll_interval=0.05):
     from rdkit.Chem import Draw
 
-    symmetry_dirs = ['C6', 'C3', 'C2', 'mirror', 'asymmetric']
+    symmetry_dirs = ['C6', 'C3', 'C2']
     for d in symmetry_dirs:
         os.makedirs(os.path.join(outdir, d), exist_ok=True)
 
@@ -510,4 +503,4 @@ def demo_with_export_range(n_molecules=10, outdir="output", min_rings=6, max_rin
 
 
 if __name__ == "__main__":
-    demo_with_export_range(n_molecules=1000, min_rings=20, max_rings=100)
+    demo_with_export_range(n_molecules=100, min_rings=20, max_rings=100)
