@@ -551,4 +551,4 @@ def demo_with_export_range(n_molecules=10, outdir="output", min_rings=20, max_ri
 
 
 if __name__ == "__main__":
-    demo_with_export_range(n_molecules=100, min_rings=20, max_rings=100)
+    demo_with_export_range(n_molecules=1000, min_rings=20, max_rings=100)
