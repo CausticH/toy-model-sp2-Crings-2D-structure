@@ -850,7 +850,7 @@ def save_ase_xyz(atoms, path, comment=""):
 # PART 5: MAIN WORKFLOW
 # =============================================================================
 
-def run_one(task_id, total_target, seed):
+def run_one(task_id, total_target, seed, N_SITES, O_SITES, B_SITES, do_N=True, do_O=True, do_B=True):
     """Wraps the single molecule generation logic to be callable by multiprocessing."""
     try:
         rng = random.Random(seed)
@@ -892,12 +892,16 @@ def run_one(task_id, total_target, seed):
         os.makedirs(out_path, exist_ok=True)
 
         defective_graph = apply_symmetric_sw(flake_graph, initial_symmetry, axial_map, rng=rng)
-        final_graph = substitute_symmetric_atoms(defective_graph, initial_symmetry, axial_map, elem='N', num_sites=1,
-                                                 rng=rng)
-        final_graph = substitute_symmetric_atoms(final_graph, initial_symmetry, axial_map, elem='O', num_sites=1,
-                                                 rng=rng)
-        final_graph = substitute_symmetric_atoms(final_graph, initial_symmetry, axial_map, elem='B', num_sites=1,
-                                                 rng=rng)
+        final_graph = defective_graph
+        if do_N:
+            final_graph = substitute_symmetric_atoms(final_graph, initial_symmetry, axial_map, elem='N', num_sites=N_SITES,
+                                                     rng=rng)
+        if do_O:
+            final_graph = substitute_symmetric_atoms(final_graph, initial_symmetry, axial_map, elem='O', num_sites=O_SITES,
+                                                     rng=rng)
+        if do_B:
+            final_graph = substitute_symmetric_atoms(final_graph, initial_symmetry, axial_map, elem='B', num_sites=B_SITES,
+                                                     rng=rng)
 
         final_symmetry_actual = detect_highest_symmetry(final_graph, axial_map)
 
@@ -960,7 +964,13 @@ def run_one(task_id, total_target, seed):
 
 
 def main():
-    N_MOLECULES = 300  # This is the target number of successes.
+    N_MOLECULES = 3000  # This is the target number of successes.
+    N_SWITCH = 1
+    O_SWITCH = 0
+    B_SWITCH = 1
+    N_SITES = 2
+    O_SITES = 0
+    B_SITES = 2
     TASK_TIMEOUT = 600  # Timeout for a single task (seconds).
     pool_size = min(os.cpu_count() or 1, N_MOLECULES)
     print(f"Using pool size: {pool_size}. Target: {N_MOLECULES} successes. Timeout: {TASK_TIMEOUT}s")
@@ -978,7 +988,8 @@ def main():
         def submit_task(idx):
             seed = rng_master.randrange(1, 2 ** 30)
             args = (idx, N_MOLECULES, seed)
-            res = pool.apply_async(run_one, args=args)
+            res = pool.apply_async(run_one, args=(idx, N_MOLECULES, seed,N_SITES, O_SITES, B_SITES,
+                                      bool(N_SWITCH), bool(O_SWITCH), bool(B_SWITCH) ))
             pending_tasks[res] = (idx, time.time())
             print(f"[Main] Submitted task {idx} (seed {seed})")
 
