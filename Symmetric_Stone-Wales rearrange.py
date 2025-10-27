@@ -557,9 +557,9 @@ def substitute_symmetric_atoms(G, symmetry, axial_map, elem, num_sites=1, rng=No
 # molecule and perform post-processing.
 # =============================================================================
 
-def optimize_2d_geometry(mol, k_bond=5000.0, k_angle=2500.0,
+def optimize_2d_geometry(mol, k_bond=20000.0, k_angle=15000.0,
                          bond_range=(1.38, 1.45), target_angle_deg=120.0,
-                         max_steps=5000):
+                         max_steps=6000):
     """
     Optimizes 2D coordinates using soft constraints with tolerance.
     Encourages 120° bond angles.
