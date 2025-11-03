@@ -289,7 +289,7 @@ def grow_random_symmetric(steps, symmetry, start_mode='auto', rng=None):
     start_mode : str
         One of:
           - 'auto'        : (default) choose seed by symmetry
-              · C2/mirror -> random choice of 'hex_center' or 'naphthalene'
+              · C2/mirror -> random choice of 'hex_center' or 'naphthalene' or 'biphenyl'
               · C3        -> random choice of 'hex_center' or 'phenalene'
               · others    -> 'hex_center'
     """
@@ -353,7 +353,6 @@ def grow_random_symmetric(steps, symmetry, start_mode='auto', rng=None):
 
     # ---------- compute pivot in axial (centroid of seed block) ----------
     if symmetry == 'C3' and mode == 'phenalene':
-
         size = 1.42
 
         def sixverts(ax):
@@ -361,25 +360,47 @@ def grow_random_symmetric(steps, symmetry, start_mode='auto', rng=None):
             return [hex_corner((cx, cy), size, i) for i in range(6)]
 
         centers_list = list(centers)
-        V0 = sixverts(centers_list[0])
-        V1 = sixverts(centers_list[1])
-        V2 = sixverts(centers_list[2])
+        V = [sixverts(ax) for ax in centers_list]
 
-        def near(a, b, eps=1e-6):
-            return (abs(a[0] - b[0]) < eps and abs(a[1] - b[1]) < eps)
+        def quantize(p, dec=4):
+            return (round(p[0], dec), round(p[1], dec))
 
-        common = None
-        for p in V0:
-            if any(near(p, q) for q in V1) and any(near(p, r) for r in V2):
-                common = p
-                break
+        sets = [set(quantize(p) for p in vv) for vv in V]
+        common_xy = list(sets[0] & sets[1] & sets[2])
 
-        if common is None:
-            # fallback
-            pivot_ax = infer_pivot_ax(centers, symmetry)
+        def cart_to_axial_float_for_pivot(x, y, size=1.42):
+            qf = ((x * math.sqrt(3) / 3) - (y / 3)) / size
+            rf = (2 * y / 3) / size
+            return (qf, rf)
+
+        if common_xy:
+            vx, vy = common_xy[0]
+            pivot_ax = cart_to_axial_float_for_pivot(vx, vy, size=size)
         else:
-            qf, rf = cart_to_axial(common[0], common[1], size=size)
-            pivot_ax = (qf, rf)
+            NBR = [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
+            S = set(centers)
+            found = None
+            for (q1, r1) in list(S):
+                for dq, dr in NBR:
+                    q2, r2 = q1 + dq, r1 + dr
+                    if (q2, r2) not in S:
+                        continue
+                    for dq2, dr2 in NBR:
+                        q3, r3 = q2 + dq2, r2 + dr2
+                        if (q3, r3) in S and (q3, r3) != (q1, r1):
+                            Vs = [set(quantize(p) for p in sixverts(ax))
+                                  for ax in [(q1, r1), (q2, r2), (q3, r3)]]
+                            inter = list(Vs[0] & Vs[1] & Vs[2])
+                            if inter:
+                                found = inter[0]
+                                break
+                    if found: break
+                if found: break
+            if found:
+                vx, vy = found
+                pivot_ax = cart_to_axial_float_for_pivot(vx, vy, size=size)
+            else:
+                pivot_ax = infer_pivot_ax(centers, symmetry)
 
     elif symmetry in ('C2', 'mirror', 'C3'):
         pivot_ax = infer_pivot_ax(centers, symmetry)
@@ -431,62 +452,52 @@ def grow_random_symmetric(steps, symmetry, start_mode='auto', rng=None):
     def orbit(ax_pos):
         """
         Return symmetric images of axial ax_pos under 'symmetry' about the pivot.
-        Uses discrete cube rounding to keep on lattice.
+        Uses discrete cube rounding to keep on lattice. Enforce full, distinct orbit.
         """
-        q, r = ax_pos
-
-        pivot_orbit = get_symmetric_equivalents((pivot_ax[0], pivot_ax[1]), symmetry, pivot_ax)
-
-        px, py = axial_to_cartesian(pivot_ax[0], pivot_ax[1])
-
-        def rot60_cube_once(x, y, z):
-            return (-z, -x, -y)
-
-        out = set()
+        exp_len_map = {'C6': 6, 'C3': 3, 'C2': 2, 'mirror': 2}
 
         if symmetry == 'mirror':
-            cx, cy = axial_to_cartesian(q, r)
+            cx, cy = axial_to_cartesian(ax_pos[0], ax_pos[1])
             vx, vy = (cx - px, cy - py)
 
-            # identity
-            out.add((q, r))
+            out = set()
+            out.add(ax_pos)  # identity
 
-            # mirror about theta
             v1x, v1y = rot2((vx, vy), -best_theta)
             v2x, v2y = (-v1x, v1y)
             mx, my = rot2((v2x, v2y), best_theta)
-
             nx, ny = px + mx, py + my
             oq, orr = cart_to_axial(nx, ny)
             out.add((oq, orr))
             return out
 
         px_c, py_c, pz_c = axial_to_cube_frac(pivot_ax[0], pivot_ax[1])
-        x, y, z = axial_to_cube_frac(q, r)
+        x, y, z = axial_to_cube_frac(ax_pos[0], ax_pos[1])
         vx, vy, vz = (x - px_c, y - py_c, z - pz_c)
 
-        def apply_sym_on_vector(idx, vxyz):
-            vx, vy, vz = vxyz
-            if symmetry == 'C6':
-                k = (0, 1, 2, 3, 4, 5)[idx]
-                for _ in range(k): vx, vy, vz = rot60_cube_once(vx, vy, vz)
-                return (vx, vy, vz)
-            elif symmetry == 'C3':
-                k = (0, 2, 4)[idx]
-                for _ in range(k): vx, vy, vz = rot60_cube_once(vx, vy, vz)
-                return (vx, vy, vz)
-            elif symmetry == 'C2':
-                k = (0, 3)[idx]
-                for _ in range(k): vx, vy, vz = rot60_cube_once(vx, vy, vz)
-                return (vx, vy, vz)
-            else:
-                return (vx, vy, vz)
+        def rot60_cube_once(x, y, z):
+            return (-z, -x, -y)
 
-        for i, _ in enumerate(pivot_orbit):
-            tvx, tvy, tvz = apply_sym_on_vector(i, (vx, vy, vz))
-            oq, orr = cube_to_axial_round(px_c + tvx, py_c + tvy, pz_c + tvz)
-            out.add((oq, orr))
-        return out
+        if symmetry == 'C6':
+            ks = (0, 1, 2, 3, 4, 5)
+        elif symmetry == 'C3':
+            ks = (0, 2, 4)  # 0°,120°,240°
+        elif symmetry == 'C2':
+            ks = (0, 3)  # 0°,180°
+        else:
+            ks = (0,)
+
+        out = []
+        for k in ks:
+            tx, ty, tz = vx, vy, vz
+            for _ in range(k):
+                tx, ty, tz = rot60_cube_once(tx, ty, tz)
+            oq, orr = cube_to_axial_round(px_c + tx, py_c + ty, pz_c + tz)
+            out.append((oq, orr))
+
+        if len(set(out)) != len(ks):
+            return set()
+        return set(out)
 
     # ---------- utilities ----------
     def is_conn(C):
@@ -819,87 +830,41 @@ def centers_to_graph(centers, size=1.42):
 # Core function: Apply Stone-Wales transformations and atom substitutions
 # on the NetworkX graph.
 # =============================================================================
-
-def _find_closest_node(G, target_coord, tolerance=5e-3):
-    """
-    Fast KDTree-based nearest node search.
-    Builds a KDTree from node coordinates once per graph.
-    """
-    if not hasattr(G, "_kdtree_cache"):
-        coords = np.array([G.nodes[n]['xy'] for n in G.nodes()])
-        G._kdtree_cache = {
-            "tree": KDTree(coords),
-            "nodes": list(G.nodes())
-        }
-
-    tree = G._kdtree_cache["tree"]
-    nodes = G._kdtree_cache["nodes"]
-
-    dist, idx = tree.query(target_coord)
-    if dist < tolerance:
-        return nodes[idx]
-    else:
-        # only warn occasionally to reduce log spam
-        if random.random() < 0.01:
-            print(f"[WARN] KDTree: nearest node {dist:.4f} Å away exceeds tolerance {tolerance}.")
-        return None
-
 def _get_orbital_atoms(G, ref_node, symmetry, axial_map, pivot_ax=None):
-
-    if ref_node not in G.nodes():
+    """
+    Return the symmetry orbit (list of node ids) of `ref_node`.
+    """
+    if ref_node not in G:
         return []
 
-    def rot2(v, deg):
-        rad = math.radians(deg)
-        c, s = math.cos(rad), math.sin(rad)
-        return (c*v[0] - s*v[1], s*v[0] + c*v[1])
-
-    def cart_to_axial_round(x, y, size=1.42):
-        qf = ((x * math.sqrt(3)/3) - (y / 3)) / size
-        rf = (2 * y / 3) / size
-        zf = -qf - rf
-        rq, rr, rz = round(qf), round(rf), round(zf)
-        dq, dr, dz = abs(rq - qf), abs(rr - rf), abs(rz - zf)
-        if dq > dr and dq > dz:
-            rq = -rr - rz
-        elif dr > dz:
-            rr = -rq - rz
-        return (int(rq), int(rr))
-
-    centers = set(axial_map.values())
-
-    # pivot decode
+    # -------- pivot --------
     if pivot_ax is None:
         px, py = 0.0, 0.0
     else:
         px, py = axial_to_cartesian(pivot_ax[0], pivot_ax[1])
 
-    # ref_node
-    q0, r0 = axial_map[ref_node]
-    cx0, cy0 = axial_to_cartesian(q0, r0)
-    rel0 = (cx0 - px, cy0 - py)
+    # -------- helpers --------
+    def rot2(v, deg):
+        """2D rotation of vector v about origin."""
+        rad = math.radians(deg)
+        c, s = math.cos(rad), math.sin(rad)
+        return (c*v[0] - s*v[1], s*v[0] + c*v[1])
 
-    # ---------- mirror → auto choose best theta ----------
-    best_theta = 0
-    if symmetry == 'mirror':
-        def score(theta):
-            hit = 0
-            for (cq, cr) in centers:
-                cx, cy = axial_to_cartesian(cq, cr)
-                vx, vy = (cx - px, cy - py)
-                v1 = rot2((vx, vy), -theta)
-                v2 = (-v1[0], v1[1])     # vertical mirror
-                nx, ny = rot2(v2, theta)
-                aq, ar = cart_to_axial_round(px + nx, py + ny)
-                if (aq, ar) in centers:
-                    hit += 1
-            return hit
+    # -------- build / reuse XY->node index --------
+    # cache key depends only on number_of_nodes; invalidated by _invalidate_hex_cache
+    if not hasattr(G, "_xy_index_cache") or \
+       G._xy_index_cache.get("stamp") != G.number_of_nodes():
+        idx = {}
+        for n in G.nodes():
+            x, y = G.nodes[n]['xy']
+            idx[(round(x, 6), round(y, 6))] = n
+        G._xy_index_cache = {
+            "map": idx,
+            "stamp": G.number_of_nodes()
+        }
+    idx_map = G._xy_index_cache["map"]
 
-        best_theta = max(
-            [(score(t), t) for t in (0, 60, 120, 180, 240, 300)]
-        )[1]
-
-    # ---------- symmetry ops ----------
+    # -------- symmetry ops --------
     if symmetry == 'C6':
         ops = [0, 60, 120, 180, 240, 300]
     elif symmetry == 'C3':
@@ -907,59 +872,85 @@ def _get_orbital_atoms(G, ref_node, symmetry, axial_map, pivot_ax=None):
     elif symmetry == 'C2':
         ops = [0, 180]
     elif symmetry == 'mirror':
-        ops = [None, 'mirror']     # identity
-    else:
-        ops = [None]
+        # --- choose best_theta from lattice centers ---
+        centers = set(axial_map.values())
 
+        # pre-compute all center Cartesian positions
+        center_cart_set = set()
+        for (cq, cr) in centers:
+            cx0, cy0 = axial_to_cartesian(cq, cr)
+            center_cart_set.add((round(cx0, 3), round(cy0, 3)))
+
+        def score(theta):
+            """Return how many centers map onto centers under mirror w.r.t. θ."""
+            hit = 0
+            for (cq, cr) in centers:
+                cx, cy = axial_to_cartesian(cq, cr)
+                vx, vy = (cx - px, cy - py)
+
+                v1x, v1y = rot2((vx, vy), -theta)   # rotate to canonical
+                v2x, v2y = (-v1x, v1y)              # reflect in vertical
+                nx, ny   = rot2((v2x, v2y), theta)  # rotate back
+
+                wx = px + nx
+                wy = py + ny
+                key = (round(wx, 3), round(wy, 3))
+                if key in center_cart_set:
+                    hit += 1
+            return hit
+        # pick θ that gives best self-consistency
+        best_theta = max(
+            ((score(t), t) for t in (0, 60, 120, 180, 240, 300)),
+            key=lambda x: x[0]
+        )[1]
+
+        ops = ['mirror', 0]   # first mirror, then identity
+    else:
+        ops = [0]             # asymmetric or C1
+
+    # -------- transform ref node --------
+    cx, cy = G.nodes[ref_node]['xy']
+    rel0 = (cx - px, cy - py)
     orbit = []
 
     for op in ops:
-        if symmetry == 'mirror' and op == 'mirror':
-            # rel0 → R^-θ → reflect → R^θ
-            v1  = rot2(rel0, -best_theta)
-            v2  = (-v1[0], v1[1])       # vertical mirror
+        if op == 'mirror':
+            # mirror = R^-θ, reflect, R^θ
+            v1 = rot2(rel0, -best_theta)
+            v2 = (-v1[0],  v1[1])      # vertical reflection
             rel = rot2(v2, best_theta)
-        elif isinstance(op, (int,float)):
-            rel = rot2(rel0, op)
         else:
-            rel = rel0
+            rel = rot2(rel0, op)
 
-        # map back
-        tx, ty = px + rel[0], py + rel[1]
-        aq, ar = cart_to_axial_round(tx, ty)
-        tgt = _find_closest_node(G, axial_to_cartesian(aq, ar))
-        if tgt is not None:
-            orbit.append(tgt)
+        tx = px + rel[0]
+        ty = py + rel[1]
 
-    orbit = list(set(orbit))
-    return orbit
+        # ---- map back (x,y) → node ----
+        # first try 1e-6 rounding
+        key = (round(tx, 6), round(ty, 6))
+        tgt = idx_map.get(key)
+        if tgt is None:
+            # fallback with 1e-5 rounding
+            key2 = (round(tx, 5), round(ty, 5))
+            tgt = idx_map.get(key2)
 
+        if tgt is None:
+            # mapping failed -> orbit invalid
+            return []
+
+        orbit.append(tgt)
+
+    # remove duplicates, keep order
+    return list(dict.fromkeys(orbit))
 def _invalidate_hex_cache(G):
-    """Invalidates cached 6-ring list stored on the graph object."""
-    try:
-        if '_hex_cache' in G.graph:
-            del G.graph['_hex_cache']
-    except Exception:
-        pass
+    if hasattr(G, "_hex_cache"):
+        G._hex_cache.clear()
 
-def _hexes_cached(G):
-    """
-    Return 6-cycles using a simple cache on G.graph.
-    We keep original _hexes(G)
-    """
-    cache = G.graph.get('_hex_cache')
-    if cache is not None:
-        # return a copy to avoid accidental mutation outside
-        return [list(c) for c in cache['hexes']]
-
-    # build & store
-    try:
-        rings6 = [tuple(c) for c in nx.cycle_basis(G) if len(c) == 6]
-    except nx.exception.NetworkXNoCycle:
-        rings6 = []
-    G.graph['_hex_cache'] = {'hexes': rings6}
-    return [list(c) for c in rings6]
-
+    if hasattr(G, "_xy_index_cache"):
+        try:
+            delattr(G, "_xy_index_cache")
+        except:
+            pass
 def _hexes(G):
     """Find all 6-membered rings in the graph."""
     try:
@@ -2119,9 +2110,8 @@ def save_ase_xyz(atoms, path, comment=""):
 # =============================================================================
 
 def run_one(task_id, total_target, seed,
-            N_SITES, O_SITES, B_SITES, S_SITES,
-            do_N=True, do_O=True, do_B=True, do_S=True,
-            do_sw=True, do_sv=True, do_dv=True, do_edge=True,
+            p_N, p_O, p_B, p_S,
+            do_sw, do_sv, do_dv, do_edge,
             max_defect_types=4):
     """Wraps the single molecule generation logic to be callable by multiprocessing."""
     try:
@@ -2163,11 +2153,29 @@ def run_one(task_id, total_target, seed,
         # ---------- Apply Structural Defects (MODIFIED for Combination) ----------
 
         # 1. Build a pool of *available* defect types based on switches
+        def _to_prob(x):
+            if isinstance(x, bool):
+                return 1.0 if x else 0.0
+            try:
+                p = float(x)
+            except:
+                return 0.0
+            return max(0.0, min(1.0, p))
+
+        p_sw   = _to_prob(do_sw)
+        p_sv   = _to_prob(do_sv)
+        p_dv   = _to_prob(do_dv)
+        p_edge = _to_prob(do_edge)
+
         available_defects = []
-        if do_sw: available_defects.append('sw')
-        if do_sv: available_defects.append('sv')
-        if do_dv: available_defects.append('dv')
-        if do_edge: available_defects.append('edge')
+        if rng.random() < p_sw:
+            available_defects.append("sw")
+        if rng.random() < p_sv:
+            available_defects.append("sv")
+        if rng.random() < p_dv:
+            available_defects.append("dv")
+        if rng.random() < p_edge:
+            available_defects.append("edge")
 
         defective_graph = flake_graph.copy()  # Start with the original flake
         applied_defects_log = []  # To track what we applied for the filename
@@ -2224,73 +2232,62 @@ def run_one(task_id, total_target, seed,
         defective_graph = add_internal_bonds_nx(defective_graph, initial_symmetry, axial_map, pivot_ax, max_dist=1.9)
 
         # ---------- Apply Chemical Substitutions (after all structural defects) ----------
-        final_graph = defective_graph  # This is now the (potentially) multi-defective graph
-        if do_N:
+        final_graph = defective_graph
+
+        # maximum 35%
+        carbon_nodes = [n for n, d in final_graph.nodes(data=True) if d.get("elem", "C") == "C"]
+        num_C = len(carbon_nodes)
+
+        sym = initial_symmetry.lower() if initial_symmetry else "asymmetric"
+        if sym == "c6":
+            sym_fac = 6
+        elif sym == "c3":
+            sym_fac = 3
+        elif sym == "c2":
+            sym_fac = 2
+        elif sym == "mirror":
+            sym_fac = 2
+        else:
+            sym_fac = 1
+
+        max_sub_allowed = max(1, int(0.35 * num_C / sym_fac))
+
+        nN = nO = nB = nS = 0
+
+        def maybe_substitute(elem_symbol: str, p_elem: float):
+            nonlocal final_graph, nN, nO, nB, nS
+            if p_elem <= 0.0 or max_sub_allowed <= 0:
+                return
+            if rng.random() >= p_elem:
+                return
+
+            # 1 ~ max_sub_allowed
+            num_sites_this_time = rng.randint(1, int(round((rng.random() ** 3) * max_sub_allowed)))
+
             retry = 0
             while retry < 5:
                 temp_graph = substitute_symmetric_atoms(
                     final_graph.copy(), initial_symmetry, axial_map, pivot_ax,
-                    elem='N', num_sites=N_SITES, rng=rng
-                )
-
-                temp_mol = graph_with_hetero_to_mol(temp_graph)
-
-                if temp_mol is None:
-                    retry += 1
-                    continue
-
-                if not violates_hetero_rules(temp_mol):
-                    final_graph = temp_graph
-                    break
-                # ❌ violates → retry
-                retry += 1
-        if do_O:
-            retry = 0
-            while retry < 5:
-                temp_graph = substitute_symmetric_atoms(
-                    final_graph.copy(), initial_symmetry, axial_map, pivot_ax,
-                    elem='O', num_sites=O_SITES, rng=rng
-                )
-
-                temp_mol = graph_with_hetero_to_mol(temp_graph)
-                if temp_mol is None:
-                    retry += 1
-                    continue
-                if not violates_hetero_rules(temp_mol):
-                    final_graph = temp_graph
-                    break
-                retry += 1
-        if do_B:
-            retry = 0
-            while retry < 5:
-                temp_graph = substitute_symmetric_atoms(
-                    final_graph.copy(), initial_symmetry, axial_map, pivot_ax,
-                    elem='B', num_sites=B_SITES, rng=rng
-                )
-
-                temp_mol = graph_with_hetero_to_mol(temp_graph)
-                if temp_mol is None:
-                    retry += 1
-                    continue
-                if not violates_hetero_rules(temp_mol):
-                    final_graph = temp_graph
-                    break
-                retry += 1
-        if do_S:
-            retry = 0
-            while retry < 5:
-                temp_graph = substitute_symmetric_atoms(
-                    final_graph.copy(), initial_symmetry, axial_map, pivot_ax,
-                    elem='S', num_sites=S_SITES, rng=rng
+                    elem=elem_symbol, num_sites=num_sites_this_time, rng=rng
                 )
                 temp_mol = graph_with_hetero_to_mol(temp_graph)
-                if temp_mol is None:
-                    retry += 1
-                    continue
-                if not violates_hetero_rules(temp_mol):
+                if temp_mol is not None and not violates_hetero_rules(temp_mol):
                     final_graph = temp_graph
+                    if elem_symbol == 'N':
+                        nN += num_sites_this_time
+                    elif elem_symbol == 'O':
+                        nO += num_sites_this_time
+                    elif elem_symbol == 'B':
+                        nB += num_sites_this_time
+                    elif elem_symbol == 'S':
+                        nS += num_sites_this_time
                     break
                 retry += 1
+
+        maybe_substitute('N', p_N)
+        maybe_substitute('O', p_O)
+        maybe_substitute('B', p_B)
+        maybe_substitute('S', p_S)
 
         # --- (Rest of the function: 2D mol, 3D embedding, checks, etc.) ---
         final_graph = _remove_dangling(final_graph)
@@ -2397,25 +2394,20 @@ def run_one(task_id, total_target, seed,
 def main():
     N_MOLECULES = 80  # This is the target number of successes.
 
-    # --- Structural Defect Switches (Enable/Disable) ---
-    SW_SWITCH = 1  # Enable Stone-Wales
-    SV_SWITCH = 1  # Enable Single Vacancy
-    DV_SWITCH = 1  # Enable Double Vacancy
-    EDGE_SWITCH = 1  # Enable Edge Defect (SV at edge)
+    # --- Structural Defect Switches (Possibility) ---
+    SW_SWITCH = 0.15
+    SV_SWITCH = 0.15
+    DV_SWITCH = 0.25
+    EDGE_SWITCH = 0.15
 
     # --- Defect Combination Control ---
     MAX_DEFECT_TYPES_TO_APPLY = 4  # Apply different types
 
     # --- Chemical Substitution Switches ---
-    N_SWITCH = 0
-    O_SWITCH = 0
-    B_SWITCH = 0
-    S_SWITCH = 0
-
-    N_SITES = 2
-    O_SITES = 0
-    B_SITES = 2
-    S_SITES = 2
+    p_N = 0.30
+    p_O = 0.20
+    p_B = 0.30
+    p_S = 0.20
 
     TASK_TIMEOUT = 600  # Timeout for a single task (seconds).
     pool_size = cpu_count()-1
@@ -2438,9 +2430,8 @@ def main():
             seed = rng_master.randrange(1, 2 ** 20)
             args = (idx, N_MOLECULES, seed)
             res = pool.apply_async(run_one, args=(idx, N_MOLECULES, seed,
-                                                  N_SITES, O_SITES, B_SITES, S_SITES,
-                                                  bool(N_SWITCH), bool(O_SWITCH), bool(B_SWITCH), bool(S_SWITCH),
-                                                  bool(SW_SWITCH), bool(SV_SWITCH), bool(DV_SWITCH), bool(EDGE_SWITCH),
+                                                  p_N, p_O, p_B, p_S,
+                                                  SW_SWITCH, SV_SWITCH, DV_SWITCH, EDGE_SWITCH,
                                                   MAX_DEFECT_TYPES_TO_APPLY))
             pending_tasks[res] = (idx, time.time())
             print(f"[Main] Submitted task {idx} (seed {seed})")
