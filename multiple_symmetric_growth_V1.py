@@ -710,22 +710,22 @@ def detect_highest_symmetry(G, axial_map, centers=None, pivot_ax=None):
         elif dr > dz:           rr = -rq - rz
         return (int(rq), int(rr))
 
-    # vector ops（沿用 TRANSFORM_OPS；mirror 是“竖直镜面”，后面会通过旋转对齐镜面）
+    # vector ops
     vec_ops_map = TRANSFORM_OPS
 
     # --- choose / infer pivot in axial (float allowed) ---
     if pivot_ax is None:
-        # 用 centers 的质心做一个默认 pivot；后续选择每个候选对称时再细化
+        # centers as defult pivot
         pq = sum(q for q, _ in centers) / max(1, len(centers))
         pr = sum(r for _, r in centers) / max(1, len(centers))
         pivot_ax = (pq, pr)
 
     px, py = cart_from_ax(pivot_ax)
 
-    # 将结点签名做成 {(axial, elem)}
+    # {(axial, elem)}
     node_sig = set((axial_map[n], G.nodes[n]['elem']) for n in nodes if n in axial_map)
 
-    # 给 mirror 一个“可旋转镜面”的实现：R(θ)^{-1}·MirrorV·R(θ)
+    # mirror rotate：R(θ)^{-1}·MirrorV·R(θ)
     def make_mirror_ops(theta_deg):
         def rot2(v, deg):
             rad = math.radians(deg)
@@ -739,9 +739,8 @@ def detect_highest_symmetry(G, axial_map, centers=None, pivot_ax=None):
             return rot2(v2, theta_deg)
         return [lambda v: v, mirror_about_theta]
 
-    # 给定对称群，检查是否成立（绕 pivot）
+    # check symmetry
     def check_symmetry(sym):
-        # 为 mirror 选择与当前图“最匹配”的镜面方向 θ ∈ {0,60,...,300}
         ops = vec_ops_map.get(sym, [lambda v: v])
         best_theta = 0
         if sym == 'mirror':
@@ -2494,4 +2493,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
