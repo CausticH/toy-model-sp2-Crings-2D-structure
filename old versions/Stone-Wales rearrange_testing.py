@@ -272,7 +272,6 @@ def centers_to_graph(centers, size=1.42):
 # =============================================================================
 # PART 2: DEFECT APPLICATION (from mod_hex.py and atom_substitude.py)
 # 核心功能：在NetworkX图上施加Stone-Wales变换和原子替换。
-# 已修改为对称性操作。
 # =============================================================================
 
 def _get_orbital_atoms(G, ref_node, symmetry, axial_map):
@@ -712,3 +711,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
